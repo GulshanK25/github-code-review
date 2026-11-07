@@ -28,8 +28,8 @@ def fake_review(diff, model):
     )
 
 
-def fake_tests(diff, review, sources, model):
 
+def fake_tests(diff, review, sources, model):
     assert review.findings[0].issue == "Authorization bypass"
     assert model == "mock-model"
 
@@ -43,8 +43,9 @@ def fake_tests(diff, review, sources, model):
             )
         ],
         pytest_code=(
+            "from auth import can_delete_account\n\n"
             "def test_non_admin_denied():\n"
-            "    assert False\n"
+            "    assert can_delete_account({'role': 'user'}) is False\n"
         ),
     )
 
@@ -101,8 +102,9 @@ def test_graph_produces_proposed_tests(
     )
 
     (tmp_path / "auth.py").write_text(
-        "def check():\n    return True\n",
-        encoding="utf-8"
+    "def can_delete_account(user):\n"
+    "    return user.get('role') == 'admin'\n",
+    encoding="utf-8"
     )
 
     monkeypatch.setattr(

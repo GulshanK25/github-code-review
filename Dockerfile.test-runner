@@ -1,0 +1,5 @@
+# Trusted, prebuilt image for running AI-generated pytest code.
+# Build once with: docker build -f Dockerfile.test-runner -t ai-code-review-pytest:local .
+FROM python:3.12-slim
+RUN pip install --no-cache-dir pytest==9.0.2
+WORKDIR /workspace
