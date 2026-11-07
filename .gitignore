@@ -5,3 +5,4 @@ __pycache__/
 .coverage
 .env
 review_report.md
+generated_tests/

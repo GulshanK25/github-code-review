@@ -1,0 +1,1 @@
+"""Example Python application used as source context for sample diff."""
