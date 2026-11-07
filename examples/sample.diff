@@ -1,0 +1,8 @@
+diff --git a/auth.py b/auth.py
+index 96aefff..c418abc 100644
+--- a/auth.py
++++ b/auth.py
+@@ -1,2 +1,2 @@
+ def can_delete_account(user):
+-    return user.get("role") == "admin"
++    return bool(user)
