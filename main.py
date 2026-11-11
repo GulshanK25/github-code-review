@@ -4,6 +4,7 @@ import argparse
 import os
 from pathlib import Path
 
+from agent.github_utils import parse_pr_url
 from agent.test_utils import validate_pytest_code
 from agent.workflow import build_graph
 
@@ -11,7 +12,11 @@ from agent.workflow import build_graph
 def main():
     parser = argparse.ArgumentParser(description="Review Git diffs with local AI")
     parser.add_argument("--repo", default=".", help="Source root or Git repository")
-    parser.add_argument("--diff-file", help="Optional .diff file")
+    inputs = parser.add_mutually_exclusive_group()
+    inputs.add_argument("--diff-file", help="Optional .diff file")
+    inputs.add_argument(
+        "--pr-url", help="GitHub PR URL; retrieves Python changes through the read-only API",
+    )
     parser.add_argument(
         "--model", default=os.getenv("OLLAMA_MODEL", "llama3:latest"),
         help="Locally installed Ollama model",
@@ -32,6 +37,11 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.pr_url:
+        try:
+            parse_pr_url(args.pr_url)
+        except ValueError as exc:
+            parser.error(str(exc))
     if args.contract and not args.generate_tests:
         parser.error("--contract requires --generate-tests")
     if args.auto_test and not args.generate_tests:
@@ -50,7 +60,8 @@ def main():
 
     graph = build_graph()
     result = graph.invoke({
-        "repo": args.repo, "diff_file": args.diff_file, "model": args.model,
+        "repo": args.repo, "diff_file": args.diff_file, "pr_url": args.pr_url,
+        "model": args.model,
         "generate_tests": args.generate_tests, "auto_test": args.auto_test,
         "tests_output": args.tests_output, "contract_path": args.contract,
     })
