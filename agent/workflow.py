@@ -7,6 +7,7 @@ from langgraph.graph import END, START, StateGraph
 
 from agent.contracts import contract_pytest_code, load_behavior_contract
 from agent.git_utils import get_repo_diff, validate_diff_size
+from agent.github_utils import fetch_pull_request
 from agent.llm import generate_tests, review_diff, revise_tests
 from agent.models import ReviewResult, TestPlan
 from agent.report import format_review, format_test_plan
@@ -19,6 +20,8 @@ MAX_ATTEMPTS = 3  # Initial generation + at most two AI revisions.
 
 class ReviewState(TypedDict, total=False):
     repo: str
+    pr_url: str | None
+    pr: dict
     diff_file: str | None
     model: str
     generate_tests: bool
@@ -38,6 +41,22 @@ class ReviewState(TypedDict, total=False):
 
 
 def load_changes(state: ReviewState) -> dict:
+    if state.get("pr_url"):
+        github_data = fetch_pull_request(
+            state["pr_url"], include_sources=bool(state.get("generate_tests")),
+        )
+        diff = github_data["diff"]
+        sources = github_data["sources"]
+        pr = github_data["pr"]
+        # Do not auto-discover a contract from the agent's own checkout.
+        # For PRs, accept only a user-selected local (trusted) contract.
+        contract = (
+            load_behavior_contract(state.get("repo", "."), state["contract_path"], sources)
+            if state.get("contract_path") and state.get("generate_tests") and diff.strip()
+            else None
+        )
+        return {"diff": diff, "sources": sources, "contract": contract, "pr": pr}
+
     if state.get("diff_file"):
         diff = validate_diff_size(Path(state["diff_file"]).read_text(encoding="utf-8"))
     else:
@@ -122,6 +141,23 @@ def build_report(state: ReviewState) -> dict:
         else ReviewResult(summary="No changes to tracked Python files were found.", findings=[])
     )
     report = format_review(review)
+    if state.get("pr"):
+        pr = state["pr"]
+        title = pr["title"].replace("`", "'")
+        report = (
+            f"## GitHub pull request\n\n"
+            f"**PR:** {pr['url']}\n\n"
+            f"**Title:** {title}\n\n"
+            f"**Changed Python files:** {pr['python_files']}\n\n"
+            "**Access:** Read-only GitHub API requests.\n\n"
+        ) + report
+        if (state.get("generate_tests")
+                and pr["sources_loaded"] < pr["python_files"]):
+            report += (
+                "\n**Source context limitation:** Some changed Python files were "
+                "not loaded (size or source-file limits). Docker may not "
+                "be able to run tests requiring those files.\n"
+            )
     if "test_plan" in state:
         plan = TestPlan.model_validate(state["test_plan"])
         report += "\n" + format_test_plan(
