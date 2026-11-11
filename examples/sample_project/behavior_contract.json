@@ -1,0 +1,28 @@
+
+{
+  "module": "auth",
+  "function": "can_delete_account",
+  "description": "Only administrators are allowed to delete accounts.",
+  "test_cases": [
+    {
+      "name": "admin_allowed",
+      "input": {"role": "admin"},
+      "expected": true
+    },
+    {
+      "name": "regular_user_denied",
+      "input": {"role": "user"},
+      "expected": false
+    },
+    {
+      "name": "guest_denied",
+      "input": {"role": "guest"},
+      "expected": false
+    },
+    {
+      "name": "missing_role_denied",
+      "input": {},
+      "expected": false
+    }
+  ]
+}

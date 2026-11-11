@@ -5,6 +5,7 @@ from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from agent.contracts import contract_pytest_code, load_behavior_contract
 from agent.git_utils import get_repo_diff, validate_diff_size
 from agent.llm import generate_tests, review_diff, revise_tests
 from agent.models import ReviewResult, TestPlan
@@ -23,6 +24,8 @@ class ReviewState(TypedDict, total=False):
     generate_tests: bool
     auto_test: bool
     tests_output: str
+    contract_path: str | None
+    contract: dict
     diff: str
     sources: list[dict[str, str]]
     summary: str
@@ -43,7 +46,11 @@ def load_changes(state: ReviewState) -> dict:
         load_changed_sources(diff, state.get("repo", "."))
         if state.get("generate_tests") and diff.strip() else []
     )
-    return {"diff": diff, "sources": sources}
+    contract = (
+        load_behavior_contract(state.get("repo", "."), state.get("contract_path"), sources)
+        if state.get("generate_tests") and diff.strip() else None
+    )
+    return {"diff": diff, "sources": sources, "contract": contract}
 
 
 def review_changes(state: ReviewState) -> dict:
@@ -61,8 +68,11 @@ def _review(state: ReviewState) -> ReviewResult:
 
 
 def generate_test_cases(state: ReviewState) -> dict:
-    plan = generate_tests(
-        state["diff"], _review(state), state.get("sources", []), state["model"],
+    args = (state["diff"], _review(state), state.get("sources", []), state["model"])
+    contract = state.get("contract")
+    plan = (
+        generate_tests(*args, contract=contract) if contract
+        else generate_tests(*args)
     )
     return {"test_plan": plan.model_dump(), "attempts": 1}
 
@@ -81,17 +91,29 @@ def revise_test_cases(state: ReviewState) -> dict:
     feedback = state.get("validation_errors", [])
     if not feedback:
         feedback = [state.get("sandbox_result", {}).get("details", "Unknown test error")[-4500:]]
-    plan = revise_tests(
+    args = (
         state["diff"], _review(state), state.get("sources", []),
-        TestPlan.model_validate(state["test_plan"]),
-        feedback, state["model"],
+        TestPlan.model_validate(state["test_plan"]), feedback, state["model"],
+    )
+    contract = state.get("contract")
+    plan = (
+        revise_tests(*args, contract=contract) if contract
+        else revise_tests(*args)
     )
     return {"test_plan": plan.model_dump(), "attempts": state["attempts"] + 1}
 
 
 def execute_tests(state: ReviewState) -> dict:
     plan = TestPlan.model_validate(state["test_plan"])
-    return {"sandbox_result": run_in_docker(plan.pytest_code, state.get("sources", []))}
+    contract = state.get("contract")
+    if contract:
+        result = run_in_docker(
+            plan.pytest_code, state.get("sources", []),
+            contract_code=contract_pytest_code(contract),
+        )
+    else:
+        result = run_in_docker(plan.pytest_code, state.get("sources", []))
+    return {"sandbox_result": result}
 
 
 def build_report(state: ReviewState) -> dict:
@@ -106,6 +128,16 @@ def build_report(state: ReviewState) -> dict:
             plan, state.get("tests_output", "generated_tests/test_ai_generated.py"),
             sources_found=bool(state.get("sources")),
         )
+        contract = state.get("contract")
+        if contract:
+            report += (
+                "\n## Behavioral contract\n\n"
+                f"**Function:** `{contract['module']}.{contract['function']}`\n\n"
+                f"**Requirements:** {len(contract['test_cases'])} explicit cases\n\n"
+                "The contract guides AI generation and revisions. With Docker enabled, "
+                "independent contract checks are executed in a separate test module "
+                "alongside the AI-generated tests.\n\n"
+            )
         report += "\n## Automated test validation\n\n"
         report += f"**Generation attempts:** {state.get('attempts', 1)}/{MAX_ATTEMPTS}\n\n"
         problems = state.get("validation_errors", [])

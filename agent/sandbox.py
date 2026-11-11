@@ -14,7 +14,9 @@ IMAGE = "ai-code-review-pytest:local"
 OUTPUT_LIMIT = 9000
 
 
-def run_in_docker(code: str, sources: list[dict[str, str]]) -> dict:
+def run_in_docker(
+    code: str, sources: list[dict[str, str]], contract_code: str | None = None,
+) -> dict:
     if not sources:
         return {"status": "not_run", "details": "No source files available to execute tests against."}
 
@@ -47,6 +49,10 @@ def run_in_docker(code: str, sources: list[dict[str, str]]) -> dict:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(source["content"], encoding="utf-8")
         (root / "test_ai_generated.py").write_text(code, encoding="utf-8")
+        if contract_code:
+            (root / "test_behavior_contract.py").write_text(
+                contract_code, encoding="utf-8"
+            )
 
         name = "ai-review-" + uuid.uuid4().hex[:12]
         command = [
@@ -61,6 +67,7 @@ def run_in_docker(code: str, sources: list[dict[str, str]]) -> dict:
             "-e", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
             IMAGE, "python", "-m", "pytest", "-q", "-p", "no:cacheprovider",
             "test_ai_generated.py",
+            *(["test_behavior_contract.py"] if contract_code else []),
         ]
         try:
             result = subprocess.run(

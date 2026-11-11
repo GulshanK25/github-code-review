@@ -1,7 +1,18 @@
-"""Deliberately vulnerable example for test generation demonstrations."""
+
+"""Example authorization module for AI code review testing."""
 
 
 def can_delete_account(user):
-    """Only users with the admin role should be allowed to delete accounts."""
+    """
+    Check whether a user is allowed to delete an account.
 
-    return bool(user)  # BUG: non-empty user dictionaries are allowed!
+    Only users with the 'admin' role are authorized.
+
+    Args:
+        user (dict): Dictionary containing user information.
+
+    Returns:
+        bool: True if the user is an admin, otherwise False.
+    """
+
+    return user.get("role") == "admin"

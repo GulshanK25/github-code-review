@@ -22,6 +22,11 @@ TEST_PROMPT = """You are a Python software test engineer writing PROPOSED pytest
 Generate meaningful tests for the code changes, including happy paths,
 boundary cases, and regression tests for issues found by code review.
 IMPORTANT: Test the INTENDED behavior, not just the buggy implementation.
+If behavior_contract is provided, treat its explicit input/output examples as
+the expected functional behavior, even if the changed implementation differs.
+Generate tests for every contract case; do not reverse the expected outcomes
+to make the buggy implementation pass. Do not invent unsupported invalid-input
+behaviors, including exceptions, when the contract does not specify them.
 For security regressions, include tests that SHOULD FAIL against the buggy
 version and PASS once the bug is fixed. Tests must have clear assertions.
 When source files are provided, the repo root is the PYTHONPATH root.
@@ -95,12 +100,14 @@ def review_diff(diff: str, model: str) -> ReviewResult:
 
 def generate_tests(
     diff: str, review: ReviewResult, sources: list[dict[str, str]], model: str,
+    contract: dict | None = None,
 ) -> TestPlan:
     """Ask Llama 3 to propose tests. It does not execute generated code."""
     payload = {
         "untrusted_git_diff": diff,
         "untrusted_review_findings": review.model_dump(),
         "untrusted_source_files": sources,
+        "behavior_contract": contract,
         "import_hints": [
             "from " + src["path"].removesuffix(".py").replace("/", ".") + " import <function>"
             for src in sources if src["path"].endswith(".py")
@@ -140,6 +147,7 @@ test rather than adding `assert True` or changing what the function should do.
 If the behavior is documented, use a meaningful assertion on the specified
 result instead. Do not leave duplicate tests.
 DO NOT make bug-revealing assertions pass by changing their expected results.
+Preserve expected results specified in behavior_contract across revisions.
 Return the complete corrected TestPlan including pytest_code, not a patch.
 """
 
@@ -147,11 +155,13 @@ Return the complete corrected TestPlan including pytest_code, not a patch.
 def revise_tests(
     diff: str, review: ReviewResult, sources: list[dict[str, str]],
     previous: TestPlan, feedback: list[str], model: str,
+    contract: dict | None = None,
 ) -> TestPlan:
     payload = {
         "untrusted_git_diff": diff,
         "untrusted_review": review.model_dump(),
         "source_files": sources,
+        "behavior_contract": contract,
         "import_hints": [
             "from " + src["path"].removesuffix(".py").replace("/", ".") + " import <function>"
             for src in sources if src["path"].endswith(".py")

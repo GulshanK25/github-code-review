@@ -17,6 +17,10 @@ def main():
         help="Locally installed Ollama model",
     )
     parser.add_argument("--output", default="review_report.md")
+    parser.add_argument(
+        "--contract",
+        help="Behavior contract JSON within --repo (auto-detected if omitted)",
+    )
     parser.add_argument("--generate-tests", action="store_true", help="Generate proposed pytest tests")
     parser.add_argument(
         "--auto-test", action="store_true",
@@ -28,6 +32,8 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.contract and not args.generate_tests:
+        parser.error("--contract requires --generate-tests")
     if args.auto_test and not args.generate_tests:
         parser.error("--auto-test requires --generate-tests")
     if args.generate_tests:
@@ -46,7 +52,7 @@ def main():
     result = graph.invoke({
         "repo": args.repo, "diff_file": args.diff_file, "model": args.model,
         "generate_tests": args.generate_tests, "auto_test": args.auto_test,
-        "tests_output": args.tests_output,
+        "tests_output": args.tests_output, "contract_path": args.contract,
     })
 
     if "test_plan" in result and not result.get("validation_errors"):
