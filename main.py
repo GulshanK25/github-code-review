@@ -28,6 +28,13 @@ def main():
     )
     parser.add_argument("--output", default="review_report.md")
     parser.add_argument(
+        "--behavior-cases", help="Explicit local JSON before/after cases matching this diff",
+    )
+    parser.add_argument(
+        "--execute-behavior-in-docker", action="store_true",
+        help="Required explicit approval to execute matched behavior cases in restricted Docker",
+    )
+    parser.add_argument(
         "--verify-findings", action="store_true",
         help="Run an optional independent AI reasoning check on evidence-matched findings",
     )
@@ -46,6 +53,12 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.execute_behavior_in_docker and not args.behavior_cases:
+        parser.error("--execute-behavior-in-docker requires --behavior-cases")
+    if args.behavior_cases and not args.execute_behavior_in_docker:
+        parser.error("--behavior-cases requires --execute-behavior-in-docker")
+    if args.behavior_cases and args.review_mode != "evidence":
+        parser.error("--behavior-cases requires --review-mode evidence")
     if args.verify_findings and args.review_mode != "evidence":
         parser.error("--verify-findings requires --review-mode evidence")
     if args.pr_url:
@@ -53,6 +66,10 @@ def main():
             parse_pr_url(args.pr_url)
         except ValueError as exc:
             parser.error(str(exc))
+    if args.diff_file and Path(args.output).resolve() == Path(args.diff_file).resolve():
+        parser.error("--output must differ from input diff")
+    if args.behavior_cases and Path(args.output).resolve() == Path(args.behavior_cases).resolve():
+        parser.error("--output must differ from behavior cases file")
     if args.contract and not args.generate_tests:
         parser.error("--contract requires --generate-tests")
     if args.auto_test and not args.generate_tests:
@@ -74,6 +91,8 @@ def main():
         "repo": args.repo, "diff_file": args.diff_file, "pr_url": args.pr_url,
         "review_mode": args.review_mode,
         "verify_findings": args.verify_findings,
+        "behavior_cases": args.behavior_cases,
+        "execute_behavior_in_docker": args.execute_behavior_in_docker,
         "model": args.model,
         "generate_tests": args.generate_tests, "auto_test": args.auto_test,
         "tests_output": args.tests_output, "contract_path": args.contract,
@@ -96,6 +115,13 @@ def main():
     output.write_text(result["report"], encoding="utf-8")
     print(result["report"])
     print(f"\nReport saved to: {output.resolve()}")
+    if args.behavior_cases:
+        rows = result.get("behavior_results", [])
+        completed = sum(row.get("status") == "completed" for row in rows)
+        print(f"Behavioral checks completed: {completed}/{len(rows)}")
+        if not rows or completed != len(rows):
+            print("Some approved behavioral checks were not run. See report for reasons.")
+            raise SystemExit(2)
 
 
 if __name__ == "__main__":

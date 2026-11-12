@@ -1,0 +1,15 @@
+[
+  {
+    "name": "auth_regression_demo",
+    "filename": "auth.py",
+    "function": "can_delete_account",
+    "expected": "bug",
+    "old_code": "\"\"\"Example vulnerable authorization logic, for opt-in behavior probes only.\"\"\"\n\ndef can_delete_account(user):\n    return user.get(\"role\") == \"admin\"\n",
+    "new_code": "\"\"\"Example vulnerable authorization logic, for opt-in behavior probes only.\"\"\"\n\ndef can_delete_account(user):\n    return bool(user)\n",
+    "probes": [
+      {"args": [{"role": "admin"}], "before": true, "after": true},
+      {"args": [{"role": "user"}], "before": false, "after": true},
+      {"args": [{"role": "guest"}], "before": false, "after": true}
+    ]
+  }
+]

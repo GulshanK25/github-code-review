@@ -1,0 +1,3 @@
+# Generated local reports and benchmark outputs
+review_*.md
+benchmarks/results/

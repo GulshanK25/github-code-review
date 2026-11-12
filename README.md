@@ -1,206 +1,168 @@
 # AI-Powered Code Review and Test Generation Agent
 
-A staged portfolio project using **Python, LangGraph, Ollama, Pydantic, and Git**.
+A local-first Python software engineering project that reviews Git diffs and GitHub pull requests with **Ollama + Qwen2.5-Coder**, validates code evidence, proposes pytest tests, and optionally executes tests or approved behavior comparisons inside restricted Docker containers.
 
-**Current status: Milestone 2.** The application reviews Git diffs and optionally
-**proposes pytest test cases and Python test code**. It does **not** execute generated
-code, fix the source, or post to GitHub. Docker-based safe validation is a later milestone.
+**Stack:** Python · LangGraph · Ollama · Qwen2.5-Coder · Pydantic · pytest · Docker · GitHub API
+
+> **Project status:** Core functionality and evaluation tooling implemented. The second AI verification pass remains **experimental**, because it missed real bugs in our benchmark. Behavioral comparison is an **opt-in** supplement, not a correctness oracle. See [Evaluation](#evaluation-results) and [Safety](#safety-and-limitations).
+
+## Features
+
+- Review **local tracked Python changes**, a saved `.diff`, or a GitHub PR URL through the read-only GitHub API.
+- Generate structured review findings with **file, line, exact changed-line evidence, severity, and suggested fix**.
+- Check that the quoted evidence really matches a changed line. Correct an incorrect line number only when the quote uniquely matches the diff.
+- Optionally have a second model pass challenge findings; keep **uncertain and rejected candidates visible** in the audit trail. This mode is experimental.
+- Generate pytest proposals using changed source context and optional explicit behavioral contracts; revise static test-generation errors up to twice.
+- Optionally execute generated tests in Docker, separately from the local Python interpreter.
+- Optionally compare old/new function behavior on explicitly supplied JSON inputs **in Docker only**, after confirming the cases match the reviewed diff and complete new-source snapshot.
+- Run two labeled benchmark sets (8 development cases + 12 holdout cases), repeat reviews, and save case-level results.
+- Run application unit tests in GitHub Actions without calling Ollama, GitHub APIs, or Docker.
 
 ## Architecture
 
-```text
-Git diff or .diff file
-        |
-   [load_changes] -- reads matching source files if available
-        |
-       diff empty? -------------------- yes ----------> [report]
-        |
-        no
-        v
-   [review via Ollama] -- Pydantic validates structured findings
-        |
-   --generate-tests?
-      |         |
-      no       yes
-      |         v
-      |    [generate_tests via Ollama] -- Pydantic + syntax checks
-      |         |
-      +---------+
-            |
-         [report] ------> review_report.md
-            |
-            +----------> generated_tests/test_ai_generated.py (if requested)
+```mermaid
+flowchart TD
+    A[Local Git diff / .diff / GitHub PR] --> B[Load diff and bounded source context]
+    B --> C[Qwen2.5-Coder: candidate review]
+    C --> D[Deterministic changed-line evidence checks]
+    D --> E{Optional second AI verifier?}
+    E -- Yes --> F[AI verdicts: supported / uncertain / rejected]
+    E -- No --> G[Evidence-backed findings]
+    F --> G
+    G --> H{Approved behavior cases?}
+    H -- Yes --> I[Strict patch and snapshot matching]
+    I --> J[Restricted Docker behavior probes]
+    H -- No --> K[Markdown report]
+    J --> K
+    G --> L{Generate pytest proposals?}
+    L -- Yes --> M[Generate and statically validate tests]
+    M --> N{Run tests in Docker?}
+    N -- Yes --> O[Restricted Docker pytest]
+    N -- No --> K
+    O --> K
+    L -- No --> K
 ```
 
-A `StateGraph` coordinates the steps. For test generation, we supply the Git
-diff, code review findings, and matching local source files when available.
+## Prerequisites
 
-## Setup (Windows PowerShell)
+1. Python 3.12 or 3.13, Git, and Windows PowerShell (or an equivalent shell).
+2. [Ollama](https://ollama.com/) running locally; install a coding model with `ollama pull qwen2.5-coder:7b`.
+3. **Optional:** Docker Desktop in Linux-container mode for `--auto-test`, standalone behavior benchmarks, and opt-in behavior comparisons. Basic review and unit tests do not require Docker.
 
-Requires Python 3.11+, Git, Ollama running, and a local model such as `llama3:latest`.
+### Install (Windows PowerShell)
 
 ```powershell
+cd C:\path\to\github-code-review
 python -m venv .venv
-.\.venv\Scripts\python.exe -m pip install -r requirements.txt
+.\.venv\Scripts\Activate.ps1
+python -m pip install -r requirements.txt
 ollama list
+python -m pytest -q
 ```
 
-If Llama 3 is missing, run `ollama pull llama3`.
-
-## Milestone 1: Review a bundled example
-
-```powershell
-.\.venv\Scripts\python.exe main.py --diff-file examples\sample.diff
-```
-
-Open `review_report.md`. The bundled diff replaces an administrator check
-with `bool(user)`, which incorrectly permits any non-empty user dictionary.
-
-## Milestone 2: Generate pytest proposals
-
-```powershell
-.\.venv\Scripts\python.exe main.py --diff-file examples\sample.diff --repo examples\sample_project --generate-tests
-```
-
-Open these outputs:
-
-- `review_report.md`: code review plus plain-English test plan.
-- `generated_tests/test_ai_generated.py`: AI-proposed Python pytest tests.
-
-`examples/sample_project/auth.py` is a deliberately buggy implementation of
-the function in the diff, so the model has real source code for context.
-A good test asserts that an ordinary user **cannot** delete an account; such
-a regression test would **fail** against the buggy implementation.
-
-For this milestone, **inspect the generated tests but do not run them yet**.
-Parsing tests for syntax does not make them safe. The model can also suggest
-incorrect imports or inaccurate assertions. Sandboxed testing is Milestone 3.
-
-To generate again, remove or rename the previous generated file, or choose a
-new filename:
-
-```powershell
-.\.venv\Scripts\python.exe main.py --diff-file examples\sample.diff --repo examples\sample_project --generate-tests --tests-output generated_tests\test_second_attempt.py
-```
-
-## Review a real Git repository
-
-After changing a tracked Python file in a Git repository with at least one commit:
-
-```powershell
-.\.venv\Scripts\python.exe main.py --repo "C:\path\to\your\repo" --generate-tests
-```
-
-Review mode includes tracked Python changes (staged and unstaged) since HEAD.
-Untracked and already-committed changes are not included. Files with more than
-6,000 characters are not supplied as complete source context; tests for them
-may be less reliable. The diff is restricted to 20,000 characters.
-
-## Unit tests (safe, mocked model responses)
-
-```powershell
-.\.venv\Scripts\python.exe -m pytest -q
-```
-
-The tests under `tests/` verify our own handwritten application code and use
-fake LLM responses. They do **not** execute AI-generated tests and do not need
-Ollama running.
-
-## Key files
-
-| File | Responsibility |
-|------|----------------|
-| `main.py` | CLI arguments, invokes workflow, writes report and optional test file |
-| `agent/workflow.py` | LangGraph nodes and conditional routing |
-| `agent/git_utils.py` | Loads tracked Python Git diff |
-| `agent/source_utils.py` | Reads changed Python files (size and path constraints) |
-| `agent/llm.py` | Two Ollama prompts: review and generate tests |
-| `agent/models.py` | Pydantic `ReviewResult` and `TestPlan` schemas |
-| `agent/test_utils.py` | Syntax-checks generated test code without executing it |
-| `agent/report.py` | Markdown review and test-plan formatting |
-| `examples/sample.diff` | Deliberate authorization regression |
-| `examples/sample_project/auth.py` | Vulnerable example source code |
-| `tests/` | Handwritten unit tests for our app |
-
-## Planned milestones
-
-1. **Local code review**: done.
-2. **AI pytest test generation**: done as a *proposal*, without execution.
-3. **Sandboxed validation**: human approval, Docker isolation, run tests, collect and analyze errors.
-4. **GitHub integration**: review PR diffs; draft reviews, never auto-post without approval.
-5. **API and evaluation**: FastAPI and quantitative evaluation of defect detection and tests.
-
-## Safety and accuracy limits
-
-- All model output is untrusted. The generated file is **not automatically run**.
-- The prompt discourages dangerous operations, but **prompts are not a security boundary**.
-- Python syntax validation does not verify imports, behavior, correctness, or safety.
-- Test files are written outside the reviewed repo by default and never overwrite
-  an existing generated test file.
-- Diff content and source files can contain secrets. Review what you send, even
-  when the model runs locally.
-- A failing regression test may be intentional: it exposes the buggy implementation.
-
-The `pytest.ini` configuration restricts default pytest discovery to the
-handwritten `tests/` directory, so `python -m pytest -q` will not accidentally
-collect proposed tests from `generated_tests/`. Running a specific generated
-file explicitly still bypasses this protection.
-
-## Milestone 2.5: Automatic AI test validation and revision
-
-This update adds a bounded LangGraph feedback loop:
-
-`generate → static checks → [revise up to twice] → Docker pytest (optional) → report`
-
-The static checks detect invalid Python syntax, missing imports for known
-changed functions, obvious duplicate test bodies, broad `pytest.raises(Exception)`
-assertions, and a short list of disallowed operations. Static checks are **not**
-a security boundary and cannot establish logical correctness.
-
-Optional Docker execution isolates the generated test from the host Python
-interpreter. The runner copies only the changed source files and generated test
-into a temporary workspace, mounts it read-only, disables network access,
-drops Linux capabilities, limits memory/CPU/processes, and enforces a timeout.
-Docker sandboxing reduces risk, but cannot guarantee zero risk or demonstrate
-that generated test expectations are correct. Never expose production secrets
-or mount your entire development environment for generated code.
-
-### Local setup on Windows (PowerShell)
-
-Start Docker Desktop and Ollama first. Build the trusted pytest image once:
+If Docker-based execution is needed, start Docker Desktop and build the local runner image:
 
 ```powershell
 docker build -f Dockerfile.test-runner -t ai-code-review-pytest:local .
 ```
 
-Generate, revise, and execute proposed tests in Docker:
+## Usage
+
+### Review a local `.diff`
 
 ```powershell
-python main.py --diff-file examples\sample.diff --repo examples\sample_project --generate-tests --auto-test --tests-output generated_tests\test_ai_generated_v3.py
+python main.py --diff-file examples\sample.diff --repo examples\sample_project --model qwen2.5-coder:7b --review-mode evidence
 ```
 
-Use a fresh `--tests-output` filename if that file already exists. Without
-`--auto-test`, the agent still performs static validation and AI retries, but
-never executes AI-generated code. Without a Docker image or matching source,
-the report records `not_run` instead of silently running tests on the host.
+### Review a real GitHub pull request
 
-### Interpreting the result
+```powershell
+python main.py --pr-url "https://github.com/GulshanK25/github-code-review/pull/1" --model qwen2.5-coder:7b --review-mode evidence
+```
 
-- `passed`: all generated tests passed on the changed code. This does not imply
-  that the tests are correct or strong.
-- `assertion_failures`: tests contain failed assertions, which may be **good**
-  evidence that a regression test catches the deliberately buggy code. The
-  agent does **not** rewrite these assertions merely to make them pass.
-- `repair_needed`: import/name/collection problems were detected; the agent
-  feeds the diagnostics to Ollama and retries, up to three total generations.
-- `not_run`, `timeout`, `environment_error`: Docker execution was unavailable,
-  interrupted, or could not reliably evaluate the tests.
+GitHub PR mode makes **read-only** GitHub API requests. Public PRs generally work without a token; private repositories may require a read-only `GITHUB_TOKEN`. The agent does **not** post comments or merge PRs.
 
-The final Markdown report includes static checks, generation attempt count,
-and Docker/pytest output. The application never edits your production source.
+### Generate and optionally execute pytest proposals
 
-Run the handwritten application tests separately:
+```powershell
+python main.py --diff-file examples\sample.diff --repo examples\sample_project --model qwen2.5-coder:7b --generate-tests --tests-output generated_tests\test_proposal_v1.py
+```
+
+Add `--auto-test` only after Docker is running. Use a fresh output filename on subsequent runs. Generated tests are proposals that need manual review; failing assertions can be desirable when testing deliberately buggy code.
+
+### Behavioral comparison integrated into the main review
+
+An **explicit local case file** is required. It includes before/after function source and JSON inputs. The system checks that its changed lines match the current review diff and that its new source matches the complete loaded new-file snapshot. Mismatches are *skipped* before Docker executes any code; the CLI returns a nonzero exit status if any approved check could not run.
+
+```powershell
+python main.py --diff-file examples\behavior_review\auth.diff --repo examples\behavior_review --model qwen2.5-coder:7b --review-mode evidence --behavior-cases examples\behavior_review\cases.json --execute-behavior-in-docker --output review_behavior_demo.md
+```
+
+The report adds a **Behavioral comparison** section with observed differences, case status, and linked changed-line findings where available. Behavior results never automatically approve or suppress AI findings. It does **not** automatically run for GitHub PRs. Using `--pr-url` with these flags requires a matching, user-approved local cases file and a complete source snapshot; unverified cases are skipped.
+
+Run behavioral probes *without the LLM* for the standalone holdout dataset:
+
+```powershell
+python -m benchmarks.behavior_compare --execute-in-docker --only holdout_safe_demorgan
+python -m benchmarks.behavior_compare --execute-in-docker --only holdout_session_expiry_reversal
+```
+
+## Evaluation results
+
+We evaluated the evidence-based review on **12 hand-authored holdout examples** (6 labeled buggy, 6 labeled safe), repeated three times on the same machine and model:
+
+| Metric (case-level proxy) | Evidence-only | Experimental AI verifier, one run |
+|---|---:|---:|
+| True positives | 6 | 1 |
+| False positives | 3 | 1 |
+| False negatives | 0 | 5 |
+| True negatives | 3 | 5 |
+| Precision | 66.7% | 50.0% |
+| Recall | 100.0% | 16.7% |
+| False alarm rate | 50.0% | 16.7% |
+
+Evidence-only produced identical **case classifications** in all three runs. These are limited fixture-level observations, not real-world performance claims. Line-evidence validation does not prove a finding correct; benchmark labels and small sample size limit inference.
+
+To reproduce evaluation (Ollama required):
+
+```powershell
+python -m benchmarks.holdout_compare --model qwen2.5-coder:7b --mode evidence --repeats 3
+python -m benchmarks.holdout_compare --model qwen2.5-coder:7b --mode both --repeats 1
+```
+
+Results are written under `benchmarks/results/`; keep them out of source control if they contain private code or probe inputs.
+
+## Tests and CI
 
 ```powershell
 python -m pytest -q
 ```
+
+GitHub Actions `.github/workflows/ci.yml` runs the handwritten test suite under Python 3.12 and 3.13 on pushes/PRs to `main`. No Ollama server, GitHub PR access, Docker daemon, or AI-generated code execution is needed in CI. This CI test suite checks application logic; it does not prove that AI findings are factually correct.
+
+## Project layout
+
+| Path | Purpose |
+|---|---|
+| `main.py` | CLI entry point and execution opt-ins |
+| `agent/workflow.py` | LangGraph review, validation, test generation, and reporting nodes |
+| `agent/llm.py` | Structured Ollama prompts and result parsing |
+| `agent/review_quality.py` | Diff-grounded line evidence checks |
+| `agent/verification_quality.py` | Experimental second-pass consistency checks |
+| `agent/behavior_integration.py` | Explicit case loading, patch/snapshot matching, report annotations |
+| `agent/behavior_sandbox.py` | Restricted Docker behavior comparisons |
+| `agent/sandbox.py` | Docker execution of AI-generated pytest code |
+| `benchmarks/` | Labeled case datasets and evaluation utilities |
+| `tests/` | Handwritten unit tests (mock external services) |
+| `.github/workflows/ci.yml` | CI tests on pull requests |
+
+## Safety and limitations
+
+- AI output is untrusted. This tool is **not** a security scanner or correctness proof. Human review remains required.
+- The coding model may hallucinate defects and miss real vulnerabilities. The second AI verifier is optional and currently **not** recommended as a quality gate.
+- Docker reduces risk but is **not** a perfect security boundary. Never run privileged Docker containers, give containers secrets, or mount an entire private repository for untrusted code.
+- Behavior probes are selected manually. Comparing JSON values and exception types cannot capture all state changes, network effects, or behavior on untested inputs. A behavior change might be intended.
+- When a complete source snapshot or exact changed-line evidence is unavailable, behavior execution is skipped rather than guessing.
+- Test generation can produce invalid or misleading assertions. Sandboxed execution results need interpretation.
+
+See [Demo walkthrough](docs/DEMO.md) and [Release checklist](docs/RELEASE_CHECKLIST.md) for a reproducible portfolio demonstration and merge steps.
