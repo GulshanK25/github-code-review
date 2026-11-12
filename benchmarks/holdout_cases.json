@@ -1,0 +1,426 @@
+[
+  {
+    "name": "holdout_session_expiry_reversal",
+    "expected": "bug",
+    "filename": "sessions.py",
+    "function": "session_valid",
+    "description": "An authentication session is valid only while now is earlier than expires_at; integers represent epoch seconds.",
+    "old_code": "def session_valid(now, expires_at):\n    \"\"\"An authentication session is valid only before its expiry time.\"\"\"\n    return now < expires_at\n",
+    "new_code": "def session_valid(now, expires_at):\n    \"\"\"An authentication session is valid only before its expiry time.\"\"\"\n    return now > expires_at\n",
+    "probes": [
+      {
+        "args": [
+          50,
+          100
+        ],
+        "before": true,
+        "after": false
+      },
+      {
+        "args": [
+          150,
+          100
+        ],
+        "before": false,
+        "after": true
+      },
+      {
+        "args": [
+          100,
+          100
+        ],
+        "before": false,
+        "after": false
+      }
+    ],
+    "bug_line": 3
+  },
+  {
+    "name": "holdout_audit_key_exposure",
+    "expected": "bug",
+    "filename": "audit.py",
+    "function": "audit_message",
+    "description": "Audit entries must not include the raw API key. The returned message is written to the login audit log.",
+    "old_code": "def audit_message(username, api_key):\n    \"\"\"Build an audit-log message without revealing credentials.\"\"\"\n    return f\"Login attempted by {username}\"\n",
+    "new_code": "def audit_message(username, api_key):\n    \"\"\"Build an audit-log message without revealing credentials.\"\"\"\n    return f\"Login attempted by {username}: {api_key}\"\n",
+    "probes": [
+      {
+        "args": [
+          "alice",
+          "secret-test-42"
+        ],
+        "before": "Login attempted by alice",
+        "after": "Login attempted by alice: secret-test-42"
+      },
+      {
+        "args": [
+          "bob",
+          "key-123"
+        ],
+        "before": "Login attempted by bob",
+        "after": "Login attempted by bob: key-123"
+      }
+    ],
+    "bug_line": 3
+  },
+  {
+    "name": "holdout_upload_traversal",
+    "expected": "bug",
+    "filename": "upload.py",
+    "function": "safe_upload_name",
+    "description": "Reject absolute POSIX paths and names whose normalized path escapes the upload root; accept ordinary relative paths.",
+    "old_code": "import posixpath\n\ndef safe_upload_name(name):\n    \"\"\"Reject absolute paths or any normalized traversal outside the upload root.\"\"\"\n    normalized = posixpath.normpath(name)\n    return normalized != '..' and not normalized.startswith('../') and not normalized.startswith('/')\n",
+    "new_code": "import posixpath\n\ndef safe_upload_name(name):\n    \"\"\"Reject absolute paths or any normalized traversal outside the upload root.\"\"\"\n    normalized = posixpath.normpath(name)\n    return normalized != '..' or not normalized.startswith('../') and not normalized.startswith('/')\n",
+    "probes": [
+      {
+        "args": [
+          "../outside.txt"
+        ],
+        "before": false,
+        "after": true
+      },
+      {
+        "args": [
+          "/etc/passwd"
+        ],
+        "before": false,
+        "after": true
+      },
+      {
+        "args": [
+          "docs/report.txt"
+        ],
+        "before": true,
+        "after": true
+      }
+    ],
+    "bug_line": 6
+  },
+  {
+    "name": "holdout_money_rounding",
+    "expected": "bug",
+    "filename": "pricing.py",
+    "function": "to_cents",
+    "description": "Price conversion must round decimal amounts to the nearest cent using ROUND_HALF_UP rather than truncate.",
+    "old_code": "from decimal import Decimal, ROUND_HALF_UP\n\ndef to_cents(amount):\n    \"\"\"Convert decimal money to cents with half-up rounding.\"\"\"\n    cents = Decimal(str(amount)) * 100\n    return int(cents.quantize(Decimal('1'), rounding=ROUND_HALF_UP))\n",
+    "new_code": "from decimal import Decimal, ROUND_HALF_UP\n\ndef to_cents(amount):\n    \"\"\"Convert decimal money to cents with half-up rounding.\"\"\"\n    cents = Decimal(str(amount)) * 100\n    return int(cents)\n",
+    "probes": [
+      {
+        "args": [
+          "1.239"
+        ],
+        "before": 124,
+        "after": 123
+      },
+      {
+        "args": [
+          "1.235"
+        ],
+        "before": 124,
+        "after": 123
+      },
+      {
+        "args": [
+          "1.230"
+        ],
+        "before": 123,
+        "after": 123
+      }
+    ],
+    "bug_line": 6
+  },
+  {
+    "name": "holdout_unique_identity_count",
+    "expected": "bug",
+    "filename": "identities.py",
+    "function": "unique_user_count",
+    "description": "The function counts distinct user IDs, not the total number of rows.",
+    "old_code": "def unique_user_count(user_ids):\n    \"\"\"Count distinct user identifiers, ignoring repeated IDs.\"\"\"\n    return len(set(user_ids))\n",
+    "new_code": "def unique_user_count(user_ids):\n    \"\"\"Count distinct user identifiers, ignoring repeated IDs.\"\"\"\n    return len(user_ids)\n",
+    "probes": [
+      {
+        "args": [
+          [
+            "a",
+            "b",
+            "a"
+          ]
+        ],
+        "before": 2,
+        "after": 3
+      },
+      {
+        "args": [
+          [
+            "a",
+            "a"
+          ]
+        ],
+        "before": 1,
+        "after": 2
+      },
+      {
+        "args": [
+          [
+            "a",
+            "b"
+          ]
+        ],
+        "before": 2,
+        "after": 2
+      }
+    ],
+    "bug_line": 3
+  },
+  {
+    "name": "holdout_tenant_cache_collision",
+    "expected": "bug",
+    "filename": "caching.py",
+    "function": "cache_key",
+    "description": "Cache entries for objects in separate tenants must be isolated, even if object IDs are equal.",
+    "old_code": "def cache_key(tenant_id, object_id):\n    \"\"\"Make a cache key unique within the tenant and object scope.\"\"\"\n    return f\"{tenant_id}:{object_id}\"\n",
+    "new_code": "def cache_key(tenant_id, object_id):\n    \"\"\"Make a cache key unique within the tenant and object scope.\"\"\"\n    return str(object_id)\n",
+    "probes": [
+      {
+        "args": [
+          "north",
+          42
+        ],
+        "before": "north:42",
+        "after": "42"
+      },
+      {
+        "args": [
+          "south",
+          42
+        ],
+        "before": "south:42",
+        "after": "42"
+      }
+    ],
+    "bug_line": 3
+  },
+  {
+    "name": "holdout_safe_invoice_prefix",
+    "expected": "safe",
+    "filename": "invoice.py",
+    "function": "is_invoice_id",
+    "description": "Input is a string. Checking a four-character prefix with slicing is equivalent to startswith.",
+    "old_code": "def is_invoice_id(value):\n    \"\"\"Return True when the string starts with INV-.\"\"\"\n    return value.startswith('INV-')\n",
+    "new_code": "def is_invoice_id(value):\n    \"\"\"Return True when the string starts with INV-.\"\"\"\n    return value[:4] == 'INV-'\n",
+    "probes": [
+      {
+        "args": [
+          "INV-42"
+        ],
+        "before": true,
+        "after": true
+      },
+      {
+        "args": [
+          "INV"
+        ],
+        "before": false,
+        "after": false
+      },
+      {
+        "args": [
+          "XINV-42"
+        ],
+        "before": false,
+        "after": false
+      }
+    ]
+  },
+  {
+    "name": "holdout_safe_demorgan",
+    "expected": "safe",
+    "filename": "alerts.py",
+    "function": "notifications_suppressed",
+    "description": "Both inputs are booleans. De Morgan rewrite preserves behavior.",
+    "old_code": "def notifications_suppressed(is_urgent, is_critical):\n    \"\"\"Suppress notifications unless a message is urgent or critical.\"\"\"\n    return not (is_urgent or is_critical)\n",
+    "new_code": "def notifications_suppressed(is_urgent, is_critical):\n    \"\"\"Suppress notifications unless a message is urgent or critical.\"\"\"\n    return (not is_urgent) and (not is_critical)\n",
+    "probes": [
+      {
+        "args": [
+          false,
+          false
+        ],
+        "before": true,
+        "after": true
+      },
+      {
+        "args": [
+          true,
+          false
+        ],
+        "before": false,
+        "after": false
+      },
+      {
+        "args": [
+          false,
+          true
+        ],
+        "before": false,
+        "after": false
+      },
+      {
+        "args": [
+          true,
+          true
+        ],
+        "before": false,
+        "after": false
+      }
+    ]
+  },
+  {
+    "name": "holdout_safe_settings_merge",
+    "expected": "safe",
+    "filename": "settings.py",
+    "function": "merge_settings",
+    "description": "Inputs are plain built-in dictionaries; later overrides take precedence. Python 3.9+.",
+    "old_code": "def merge_settings(defaults, overrides):\n    \"\"\"Merge two plain dicts without modifying either argument.\"\"\"\n    return {**defaults, **overrides}\n",
+    "new_code": "def merge_settings(defaults, overrides):\n    \"\"\"Merge two plain dicts without modifying either argument.\"\"\"\n    return defaults | overrides\n",
+    "probes": [
+      {
+        "args": [
+          {
+            "a": 1,
+            "b": 2
+          },
+          {
+            "b": 9,
+            "c": 3
+          }
+        ],
+        "before": {
+          "a": 1,
+          "b": 9,
+          "c": 3
+        },
+        "after": {
+          "a": 1,
+          "b": 9,
+          "c": 3
+        }
+      },
+      {
+        "args": [
+          {},
+          {
+            "enabled": true
+          }
+        ],
+        "before": {
+          "enabled": true
+        },
+        "after": {
+          "enabled": true
+        }
+      }
+    ]
+  },
+  {
+    "name": "holdout_safe_decimal_int_parse",
+    "expected": "safe",
+    "filename": "parsing.py",
+    "function": "parse_decimal",
+    "description": "Input is a valid signed base-10 integer string. Passing base=10 explicitly is equivalent.",
+    "old_code": "def parse_decimal(text):\n    \"\"\"Parse a valid signed decimal integer string.\"\"\"\n    return int(text.strip())\n",
+    "new_code": "def parse_decimal(text):\n    \"\"\"Parse a valid signed decimal integer string.\"\"\"\n    return int(text.strip(), 10)\n",
+    "probes": [
+      {
+        "args": [
+          "  +19 "
+        ],
+        "before": 19,
+        "after": 19
+      },
+      {
+        "args": [
+          "-02"
+        ],
+        "before": -2,
+        "after": -2
+      },
+      {
+        "args": [
+          "0"
+        ],
+        "before": 0,
+        "after": 0
+      }
+    ]
+  },
+  {
+    "name": "holdout_safe_integer_absolute",
+    "expected": "safe",
+    "filename": "distance.py",
+    "function": "absolute_delta",
+    "description": "The function receives Python integers (not custom numeric objects). Replacing abs with a sign check preserves values.",
+    "old_code": "def absolute_delta(delta):\n    \"\"\"Return the absolute value of an integer difference.\"\"\"\n    return abs(delta)\n",
+    "new_code": "def absolute_delta(delta):\n    \"\"\"Return the absolute value of an integer difference.\"\"\"\n    return -delta if delta < 0 else delta\n",
+    "probes": [
+      {
+        "args": [
+          -9
+        ],
+        "before": 9,
+        "after": 9
+      },
+      {
+        "args": [
+          0
+        ],
+        "before": 0,
+        "after": 0
+      },
+      {
+        "args": [
+          24
+        ],
+        "before": 24,
+        "after": 24
+      }
+    ]
+  },
+  {
+    "name": "holdout_safe_strip_mapping",
+    "expected": "safe",
+    "filename": "cleaning.py",
+    "function": "strip_lines",
+    "description": "For a list of normal strings, list comprehension and map(str.strip, ...) return the same new list.",
+    "old_code": "def strip_lines(lines):\n    \"\"\"Return a new list of strings with whitespace removed from ends.\"\"\"\n    return [line.strip() for line in lines]\n",
+    "new_code": "def strip_lines(lines):\n    \"\"\"Return a new list of strings with whitespace removed from ends.\"\"\"\n    return list(map(str.strip, lines))\n",
+    "probes": [
+      {
+        "args": [
+          [
+            " one ",
+            "two\n",
+            "  three  "
+          ]
+        ],
+        "before": [
+          "one",
+          "two",
+          "three"
+        ],
+        "after": [
+          "one",
+          "two",
+          "three"
+        ]
+      },
+      {
+        "args": [
+          []
+        ],
+        "before": [],
+        "after": []
+      }
+    ]
+  }
+]
