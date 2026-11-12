@@ -1,0 +1,2 @@
+# Optional line to add to the EXISTING .gitignore:
+benchmarks/results/

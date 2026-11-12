@@ -21,7 +21,16 @@ def main():
         "--model", default=os.getenv("OLLAMA_MODEL", "llama3:latest"),
         help="Locally installed Ollama model",
     )
+    parser.add_argument(
+        "--review-mode", choices=("evidence", "basic"), default="evidence",
+        help="Evidence-based review with changed-line validation (default), "
+             "or legacy basic mode",
+    )
     parser.add_argument("--output", default="review_report.md")
+    parser.add_argument(
+        "--verify-findings", action="store_true",
+        help="Run an optional independent AI reasoning check on evidence-matched findings",
+    )
     parser.add_argument(
         "--contract",
         help="Behavior contract JSON within --repo (auto-detected if omitted)",
@@ -37,6 +46,8 @@ def main():
     )
     args = parser.parse_args()
 
+    if args.verify_findings and args.review_mode != "evidence":
+        parser.error("--verify-findings requires --review-mode evidence")
     if args.pr_url:
         try:
             parse_pr_url(args.pr_url)
@@ -61,6 +72,8 @@ def main():
     graph = build_graph()
     result = graph.invoke({
         "repo": args.repo, "diff_file": args.diff_file, "pr_url": args.pr_url,
+        "review_mode": args.review_mode,
+        "verify_findings": args.verify_findings,
         "model": args.model,
         "generate_tests": args.generate_tests, "auto_test": args.auto_test,
         "tests_output": args.tests_output, "contract_path": args.contract,

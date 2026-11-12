@@ -1,0 +1,70 @@
+[
+  {
+    "name": "auth_role_bypass",
+    "expected": "bug",
+    "filename": "auth.py",
+    "bug_line": 3,
+    "description": "An administrator-only check was replaced with dictionary truthiness.",
+    "old_code": "def can_delete_account(user):\n    \"\"\"Only administrators may delete accounts.\"\"\"\n    return user.get('role') == 'admin'\n",
+    "new_code": "def can_delete_account(user):\n    \"\"\"Only administrators may delete accounts.\"\"\"\n    return bool(user)\n"
+  },
+  {
+    "name": "adult_boundary_regression",
+    "expected": "bug",
+    "filename": "eligibility.py",
+    "bug_line": 3,
+    "description": "Age 18 was accidentally excluded from adult eligibility.",
+    "old_code": "def is_adult(age):\n    \"\"\"An age of 18 or more is adult.\"\"\"\n    return age >= 18\n",
+    "new_code": "def is_adult(age):\n    \"\"\"An age of 18 or more is adult.\"\"\"\n    return age > 18\n"
+  },
+  {
+    "name": "order_total_arithmetic",
+    "expected": "bug",
+    "filename": "orders.py",
+    "bug_line": 3,
+    "description": "Line-item total should multiply unit price by quantity, not add them.",
+    "old_code": "def line_total(price, quantity):\n    \"\"\"Compute the unit price multiplied by quantity.\"\"\"\n    return price * quantity\n",
+    "new_code": "def line_total(price, quantity):\n    \"\"\"Compute the unit price multiplied by quantity.\"\"\"\n    return price + quantity\n"
+  },
+  {
+    "name": "divide_by_zero_guard",
+    "expected": "bug",
+    "filename": "ratios.py",
+    "bug_line": 3,
+    "description": "An existing zero-denominator check was changed to check one.",
+    "old_code": "def safe_ratio(numerator, denominator):\n    \"\"\"Return zero for a zero denominator; otherwise divide.\"\"\"\n    if denominator == 0:\n        return 0\n    return numerator / denominator\n",
+    "new_code": "def safe_ratio(numerator, denominator):\n    \"\"\"Return zero for a zero denominator; otherwise divide.\"\"\"\n    if denominator == 1:\n        return 0\n    return numerator / denominator\n"
+  },
+  {
+    "name": "safe_auth_default",
+    "expected": "safe",
+    "filename": "auth.py",
+    "description": "Explicit empty-string default preserves administrator check for dictionaries.",
+    "old_code": "def can_delete_account(user):\n    \"\"\"Only admins can delete accounts. User is a dictionary.\"\"\"\n    return user.get('role') == 'admin'\n",
+    "new_code": "def can_delete_account(user):\n    \"\"\"Only admins can delete accounts. User is a dictionary.\"\"\"\n    return user.get('role', '') == 'admin'\n"
+  },
+  {
+    "name": "safe_multiplication_commute",
+    "expected": "safe",
+    "filename": "orders.py",
+    "description": "Reordering numeric multiplication preserves the total.",
+    "old_code": "def line_total(price, quantity):\n    \"\"\"Compute total for numeric unit price and quantity.\"\"\"\n    return price * quantity\n",
+    "new_code": "def line_total(price, quantity):\n    \"\"\"Compute total for numeric unit price and quantity.\"\"\"\n    return quantity * price\n"
+  },
+  {
+    "name": "safe_adult_comparison",
+    "expected": "safe",
+    "filename": "eligibility.py",
+    "description": "Equivalent comparison preserves age 18 eligibility.",
+    "old_code": "def is_adult(age):\n    \"\"\"An age of 18 or more is adult.\"\"\"\n    return age >= 18\n",
+    "new_code": "def is_adult(age):\n    \"\"\"An age of 18 or more is adult.\"\"\"\n    return 18 <= age\n"
+  },
+  {
+    "name": "safe_zero_check_rewrite",
+    "expected": "safe",
+    "filename": "ratios.py",
+    "description": "Numeric denominator zero check is rewritten using an equivalent numeric comparison.",
+    "old_code": "def safe_ratio(numerator, denominator):\n    \"\"\"For numeric inputs return zero for a zero denominator.\"\"\"\n    if denominator == 0:\n        return 0\n    return numerator / denominator\n",
+    "new_code": "def safe_ratio(numerator, denominator):\n    \"\"\"For numeric inputs return zero for a zero denominator.\"\"\"\n    if 0 == denominator:\n        return 0\n    return numerator / denominator\n"
+  }
+]
