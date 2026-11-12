@@ -17,8 +17,13 @@ def format_review(review: ReviewResult) -> str:
             lines.extend([
                 f"### {index}. {finding.severity.upper()} | `{location}`", "",
                 f"**Issue:** {finding.issue}", "",
-                f"**Suggestion:** {finding.suggestion}", "",
             ])
+            if finding.evidence:
+                side = "original file" if finding.line_side == "old" else "new file"
+                lines.extend([
+                    f"**Changed-line evidence ({side}):** `{finding.evidence.strip()}`", "",
+                ])
+            lines.extend([f"**Suggestion:** {finding.suggestion}", ""])
     lines.extend([
         "---", "",
         "*AI suggestions are unverified. Review them before changing code.*", "",

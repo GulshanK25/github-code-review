@@ -6,3 +6,7 @@ __pycache__/
 .env
 review_report.md
 generated_tests/
+# Milestone 5 generated outputs
+benchmarks/results/
+review_auth_benchmark.md
+review_safe_benchmark.md
