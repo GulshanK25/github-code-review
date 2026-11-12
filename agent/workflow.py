@@ -5,6 +5,7 @@ from typing import TypedDict
 
 from langgraph.graph import END, START, StateGraph
 
+from agent.behavior_integration import format_behavior_observations, run_review_behavior_cases
 from agent.contracts import contract_pytest_code, load_behavior_contract
 from agent.git_utils import get_repo_diff, validate_diff_size
 from agent.github_utils import fetch_pull_request
@@ -23,6 +24,9 @@ class ReviewState(TypedDict, total=False):
     repo: str
     pr_url: str | None
     review_mode: str
+    behavior_cases: str | None
+    execute_behavior_in_docker: bool
+    behavior_results: list[dict]
     review_candidates: int
     review_held: list[str]
     review_evidence_count: int
@@ -161,6 +165,26 @@ def verify_review(state: ReviewState) -> dict:
 
 
 
+
+def compare_review_behavior(state: ReviewState) -> dict:
+    """Optional Docker probes, only for cases anchored to the reviewed snapshot."""
+    if not state.get("behavior_cases"):
+        return {}
+    try:
+        rows = run_review_behavior_cases(
+            state["behavior_cases"], state["diff"], state.get("sources", []),
+            state.get("findings", []),
+            execute=bool(state.get("execute_behavior_in_docker")),
+        )
+    except (ValueError, OSError) as exc:
+        rows = [{
+            "case": "input_validation", "file": "n/a", "function": "n/a",
+            "status": "not_run", "observation": "not_run", "details": str(exc),
+            "probes_run": 0, "differences": None, "related_findings": [],
+        }]
+    return {"behavior_results": rows}
+
+
 def _review(state: ReviewState) -> ReviewResult:
     return ReviewResult.model_validate({
         "summary": state["summary"], "findings": state["findings"],
@@ -293,6 +317,8 @@ def build_report(state: ReviewState) -> dict:
                 1,
             )
         report = report.replace("# AI Code Review\n\n", "# AI Code Review\n\n" + note, 1)
+    if state.get("behavior_cases"):
+        report += "\n" + format_behavior_observations(state.get("behavior_results", []))
     if state.get("pr"):
         pr = state["pr"]
         title = pr["title"].replace("`", "'")
@@ -383,6 +409,7 @@ def build_graph():
     builder.add_node("review", review_changes)
     builder.add_node("validate_review", validate_review)
     builder.add_node("verify_review", verify_review)
+    builder.add_node("behavior", compare_review_behavior)
     builder.add_node("tests", generate_test_cases)
     builder.add_node("validate", validate_tests)
     builder.add_node("revise", revise_test_cases)
@@ -395,8 +422,9 @@ def build_graph():
     )
     builder.add_edge("review", "validate_review")
     builder.add_edge("validate_review", "verify_review")
+    builder.add_edge("verify_review", "behavior")
     builder.add_conditional_edges(
-        "verify_review", after_review, {"tests": "tests", "report": "report"},
+        "behavior", after_review, {"tests": "tests", "report": "report"},
     )
     builder.add_edge("tests", "validate")
     builder.add_conditional_edges(

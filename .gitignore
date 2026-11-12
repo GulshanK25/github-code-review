@@ -10,3 +10,6 @@ generated_tests/
 benchmarks/results/
 review_auth_benchmark.md
 review_safe_benchmark.md
+# Generated local reports and benchmark outputs
+review_*.md
+benchmarks/results/
